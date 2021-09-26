@@ -200,6 +200,7 @@ var builtins = [...]struct {
 	{"runtime.deferprocStack", 1},
 	{"runtime.deferreturn", 1},
 	{"runtime.newproc", 1},
+	{"runtime.newprocorder", 1},
 	{"runtime.panicoverflow", 1},
 	{"runtime.sigpanic", 1},
 	{"runtime.gcWriteBarrier", 0},

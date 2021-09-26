@@ -82,6 +82,7 @@ func initssaconfig() {
 	msanmove = sysfunc("msanmove")
 	newobject = sysfunc("newobject")
 	newproc = sysfunc("newproc")
+	newprocorder = sysfunc("newprocorder")
 	panicdivide = sysfunc("panicdivide")
 	panicdottypeE = sysfunc("panicdottypeE")
 	panicdottypeI = sysfunc("panicdottypeI")
@@ -1178,6 +1179,9 @@ func (s *state) stmt(n *Node) {
 		}
 	case OGO:
 		s.callResult(n.Left, callGo)
+
+	case OGORDER:
+		s.callResult(n.Left, callGorder)
 
 	case OAS2DOTTYPE:
 		res, resok := s.dottype(n.Right, true)
@@ -3227,6 +3231,7 @@ const (
 	callDefer
 	callDeferStack
 	callGo
+	callGorder
 )
 
 type sfRtCallDef struct {
@@ -4746,6 +4751,14 @@ func (s *state) call(n *Node, k callKind, returnResultAddr bool) *ssa.Value {
 			} else {
 				call = s.newValue1A(ssa.OpStaticCall, types.TypeMem, aux, s.mem())
 			}
+		case k == callGorder:
+			aux := ssa.StaticAuxCall(newprocorder, ACArgs, ACResults)
+			if testLateExpansion {
+				call = s.newValue0A(ssa.OpStaticLECall, aux.LateExpansionResultType(), aux)
+				call.AddArgs(callArgs...)
+			} else {
+				call = s.newValue1A(ssa.OpStaticCall, types.TypeMem, aux, s.mem())
+			}
 		case closure != nil:
 			// rawLoad because loading the code pointer from a
 			// closure is always safe, but IsSanitizerSafeAddr
@@ -4828,7 +4841,7 @@ func (s *state) call(n *Node, k callKind, returnResultAddr bool) *ssa.Value {
 // maybeNilCheckClosure checks if a nil check of a closure is needed in some
 // architecture-dependent situations and, if so, emits the nil check.
 func (s *state) maybeNilCheckClosure(closure *ssa.Value, k callKind) {
-	if thearch.LinkArch.Family == sys.Wasm || objabi.GOOS == "aix" && k != callGo {
+	if thearch.LinkArch.Family == sys.Wasm || objabi.GOOS == "aix" && k != callGo && k != callGorder {
 		// On AIX, the closure needs to be verified as fn can be nil, except if it's a call go. This needs to be handled by the runtime to have the "go of nil func value" error.
 		// TODO(neelance): On other architectures this should be eliminated by the optimization steps
 		s.nilCheck(closure)

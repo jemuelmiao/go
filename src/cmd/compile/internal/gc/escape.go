@@ -386,7 +386,7 @@ func (e *Escape) stmt(n *Node) {
 		}
 	case OCALLFUNC, OCALLMETH, OCALLINTER, OCLOSE, OCOPY, ODELETE, OPANIC, OPRINT, OPRINTN, ORECOVER:
 		e.call(nil, n, nil)
-	case OGO, ODEFER:
+	case OGO, ODEFER, OGORDER:
 		e.stmts(n.Left.Ninit)
 		e.call(nil, n.Left, n)
 

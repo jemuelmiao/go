@@ -703,7 +703,7 @@ func (o *Order) stmt(n *Node) {
 		o.cleanTemp(t)
 
 	// Special: order arguments to inner call but not call itself.
-	case ODEFER, OGO:
+	case ODEFER, OGO, OGORDER:
 		t := o.markTemp()
 		o.init(n.Left)
 		o.call(n.Left)

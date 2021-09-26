@@ -1,42 +1,45 @@
-# The Go Programming Language
+# 支持优先级协程调度，基于go1.16.7改造
 
-Go is an open source programming language that makes it easy to build simple,
-reliable, and efficient software.
+### 编译
+`git clone https://git.code.tencent.com/jemuelmiao/go.git`
 
-![Gopher image](https://golang.org/doc/gopher/fiveyears.jpg)
-*Gopher image by [Renee French][rf], licensed under [Creative Commons 3.0 Attributions license][cc3-by].*
+`cd go/src`
 
-Our canonical Git repository is located at https://go.googlesource.com/go.
-There is a mirror of the repository at https://github.com/golang/go.
+`./all.bash`
 
-Unless otherwise noted, the Go source files are distributed under the
-BSD-style license found in the LICENSE file.
+编译后的go在目录go/bin
 
-### Download and Install
+### 关键字说明
+增加了gorder关键字，使用gorder调用的函数第一个参数需要为整型优先级，值越大优先级越高。
 
-#### Binary Distributions
+### 使用方式
 
-Official binary distributions are available at https://golang.org/dl/.
-
-After downloading a binary release, visit https://golang.org/doc/install
-for installation instructions.
-
-#### Install From Source
-
-If a binary distribution is not available for your combination of
-operating system and architecture, visit
-https://golang.org/doc/install/source
-for source installation instructions.
-
-### Contributing
-
-Go is the work of thousands of contributors. We appreciate your help!
-
-To contribute, please read the contribution guidelines at https://golang.org/doc/contribute.html.
-
-Note that the Go project uses the issue tracker for bug reports and
-proposals only. See https://golang.org/wiki/Questions for a list of
-places to ask questions about the Go language.
-
-[rf]: https://reneefrench.blogspot.com/
-[cc3-by]: https://creativecommons.org/licenses/by/3.0/
+```golang
+package main
+import (
+        "fmt"
+        "sync"
+)
+func main() {
+        var wg sync.WaitGroup
+        //=====任务A=====
+        wg.Add(1)
+        gorder func(priority int) {
+                defer wg.Done()
+                fmt.Println("任务A")
+        }(1)
+        //=====任务B=====
+        wg.Add(1)
+        gorder func(priority int) {
+                defer wg.Done()
+                fmt.Println("任务B")
+        }(100)
+        //=====任务C=====
+        wg.Add(1)
+        gorder func(priority int) {
+                defer wg.Done()
+                fmt.Println("任务C")
+        }(10)
+        wg.Wait()
+}
+```

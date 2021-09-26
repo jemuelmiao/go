@@ -397,6 +397,7 @@ func (v *hairyVisitor) visit(n *Node) bool {
 		ORANGE,
 		OSELECT,
 		OGO,
+		OGORDER,
 		ODEFER,
 		ODCLTYPE, // can't print yet
 		ORETJMP:
@@ -589,7 +590,7 @@ func inlnode(n *Node, maxCost int32, inlMap map[*Node]bool) *Node {
 	}
 
 	switch n.Op {
-	case ODEFER, OGO:
+	case ODEFER, OGO, OGORDER:
 		switch n.Left.Op {
 		case OCALLFUNC, OCALLMETH:
 			n.Left.SetNoInline(true)

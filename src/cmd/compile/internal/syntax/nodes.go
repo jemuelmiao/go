@@ -374,7 +374,7 @@ type (
 	}
 
 	CallStmt struct {
-		Tok  token // Go or Defer
+		Tok  token // Go or Defer or Gorder
 		Call *CallExpr
 		stmt
 	}

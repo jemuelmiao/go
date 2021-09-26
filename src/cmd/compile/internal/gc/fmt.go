@@ -1092,6 +1092,9 @@ func (n *Node) stmtfmt(s fmt.State, mode fmtMode) {
 	case OGO:
 		mode.Fprintf(s, "go %v", n.Left)
 
+	case OGORDER:
+		mode.Fprintf(s, "gorder %v", n.Left)
+
 	case ODEFER:
 		mode.Fprintf(s, "defer %v", n.Left)
 
@@ -1305,6 +1308,7 @@ var opprec = []int{
 	OIF:         -1,
 	OLABEL:      -1,
 	OGO:         -1,
+	OGORDER:	 -1,
 	ORANGE:      -1,
 	ORETURN:     -1,
 	OSELECT:     -1,

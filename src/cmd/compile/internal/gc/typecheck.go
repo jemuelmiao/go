@@ -1997,6 +1997,11 @@ func typecheck1(n *Node, top int) (res *Node) {
 		n.Left = typecheck(n.Left, ctxStmt|ctxExpr)
 		checkdefergo(n)
 
+	case OGORDER:
+		ok |= ctxStmt
+		n.Left = typecheck(n.Left, ctxStmt|ctxExpr)
+		checkgorder(n)
+
 	case OFOR, OFORUNTIL:
 		ok |= ctxStmt
 		typecheckslice(n.Ninit.Slice(), ctxStmt)
@@ -2258,6 +2263,66 @@ func checkdefergo(n *Node) {
 		// a conversion.
 		n.SetDiag(true)
 		yyerrorl(n.Pos, "%s requires function call, not conversion", what)
+	}
+}
+
+func checkgorder(n *Node) {
+	//需要priority参数，且为整数
+	if n.Left.List.Len() <= 0 {
+		yyerrorl(n.Pos, "gorder requires function with priority as first parameter")
+		return
+	}
+	t := n.Left.List.First().Type
+	if t != nil && !t.IsInteger() {
+		yyerrorl(n.Pos, "priority should be integer")
+		return
+	}
+
+	switch n.Left.Op {
+	// ok
+	case OCALLINTER,
+		OCALLMETH,
+		OCALLFUNC,
+		OCLOSE,
+		OCOPY,
+		ODELETE,
+		OPANIC,
+		OPRINT,
+		OPRINTN,
+		ORECOVER:
+		return
+
+	case OAPPEND,
+		OCAP,
+		OCOMPLEX,
+		OIMAG,
+		OLEN,
+		OMAKE,
+		OMAKESLICE,
+		OMAKECHAN,
+		OMAKEMAP,
+		ONEW,
+		OREAL,
+		OLITERAL: // conversion or unsafe.Alignof, Offsetof, Sizeof
+		if n.Left.Orig != nil && n.Left.Orig.Op == OCONV {
+			break
+		}
+		yyerrorl(n.Pos, "gorder discards result of %v", n.Left)
+		return
+	}
+
+	// type is broken or missing, most likely a method call on a broken type
+	// we will warn about the broken type elsewhere. no need to emit a potentially confusing error
+	if n.Left.Type == nil || n.Left.Type.Broke() {
+		return
+	}
+
+	if !n.Diag() {
+		// The syntax made sure it was a call, so this must be
+		// a conversion.
+		n.SetDiag(true)
+		yyerrorl(n.Pos, "gorder requires function call, not conversion")
+		return
 	}
 }
 

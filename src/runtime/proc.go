@@ -3125,7 +3125,14 @@ top:
 	// Sanity check: if we are spinning, the run queue should be empty.
 	// Check this before calling checkTimers, as that might call
 	// goready to put a ready goroutine on the local run queue.
+	/*
 	if _g_.m.spinning && (pp.runnext != 0 || pp.runqhead != pp.runqtail) {
+		throw("schedule: spinning with local work")
+	}
+	 */
+	//modify by jemuel
+	_, hl := loadrunqhead(pp)
+	if _g_.m.spinning && (pp.runnext != 0 || uint32(hl) != pp.runqtail) {
 		throw("schedule: spinning with local work")
 	}
 
@@ -4020,7 +4027,29 @@ func newproc(siz int32, fn *funcval) {
 	gp := getg()
 	pc := getcallerpc()
 	systemstack(func() {
-		newg := newproc1(fn, argp, siz, gp, pc)
+		newg := newproc1(0, fn, argp, siz, gp, pc)
+
+		_p_ := getg().m.p.ptr()
+		runqput(_p_, newg, true)
+
+		if mainStarted {
+			wakep()
+		}
+	})
+}
+
+//Create a new g running fn with siz bytes of arguments.
+//The first argument is priority.
+//modify by jemuel
+//go:nosplit
+func newprocorder(siz int32, fn *funcval) {
+	argp := add(unsafe.Pointer(&fn), sys.PtrSize)
+	//第一个参数在栈尾
+	priority := *(*int32)(add(argp, uintptr(siz)-sys.PtrSize))
+	gp := getg()
+	pc := getcallerpc()
+	systemstack(func() {
+		newg := newproc1(priority, fn, argp, siz, gp, pc)
 
 		_p_ := getg().m.p.ptr()
 		runqput(_p_, newg, true)
@@ -4040,7 +4069,7 @@ func newproc(siz int32, fn *funcval) {
 // newproc, which cannot split the stack.
 //
 //go:systemstack
-func newproc1(fn *funcval, argp unsafe.Pointer, narg int32, callergp *g, callerpc uintptr) *g {
+func newproc1(priority int32, fn *funcval, argp unsafe.Pointer, narg int32, callergp *g, callerpc uintptr) *g {
 	_g_ := getg()
 
 	if fn == nil {
@@ -4103,6 +4132,7 @@ func newproc1(fn *funcval, argp unsafe.Pointer, narg int32, callergp *g, callerp
 		}
 	}
 
+	newg.priority = priority
 	memclrNoHeapPointers(unsafe.Pointer(&newg.sched), unsafe.Sizeof(newg.sched))
 	newg.sched.sp = sp
 	newg.stktopsp = sp
@@ -4736,6 +4766,7 @@ func (pp *p) destroy() {
 	assertWorldStopped()
 
 	// Move all runnable goroutines to the global queue
+	/*
 	for pp.runqhead != pp.runqtail {
 		// Pop from tail of local queue
 		pp.runqtail--
@@ -4743,6 +4774,19 @@ func (pp *p) destroy() {
 		// Push onto head of global queue
 		globrunqputhead(gp)
 	}
+	 */
+
+	//modify by jemuel
+	hh, hl := loadrunqhead(pp)
+	runq := &pp.runq[hh]
+	for uint32(hl) != pp.runqtail {
+		// Pop from tail of local queue
+		pp.runqtail--
+		gp := runq[pp.runqtail%uint32(len(runq))].ptr()
+		// Push onto head of global queue
+		globrunqputhead(gp)
+	}
+
 	if pp.runnext != 0 {
 		globrunqputhead(pp.runnext.ptr())
 		pp.runnext = 0
@@ -5452,8 +5496,15 @@ func schedtrace(detailed bool) {
 	// E.g. (p->m ? p->m->id : -1) can crash if p->m changes from non-nil to nil.
 	for i, _p_ := range allp {
 		mp := _p_.m.ptr()
+		/*
 		h := atomic.Load(&_p_.runqhead)
 		t := atomic.Load(&_p_.runqtail)
+		 */
+		//modify by jemuel
+		_, hl := loadrunqhead(_p_)
+		h := uint32(hl)
+		t := atomic.Load(&_p_.runqtail)
+
 		if detailed {
 			id := int64(-1)
 			if mp != nil {
@@ -5611,7 +5662,14 @@ func globrunqputhead(gp *g) {
 func globrunqputbatch(batch *gQueue, n int32) {
 	assertLockHeld(&sched.lock)
 
+	/*
 	sched.runq.pushBackAll(*batch)
+	sched.runqsize += n
+	*batch = gQueue{}
+	 */
+
+	//modify by jemuel
+	sched.runq.pushAllOrder(*batch)
 	sched.runqsize += n
 	*batch = gQueue{}
 }
@@ -5632,8 +5690,14 @@ func globrunqget(_p_ *p, max int32) *g {
 	if max > 0 && n > max {
 		n = max
 	}
+	/*
 	if n > int32(len(_p_.runq))/2 {
 		n = int32(len(_p_.runq)) / 2
+	}
+	 */
+	//modify by jemuel
+	if n > int32(len(_p_.runq[0]))/2 {
+		n = int32(len(_p_.runq[0])) / 2
 	}
 
 	sched.runqsize -= n
@@ -5760,8 +5824,21 @@ func runqempty(_p_ *p) bool {
 	// 2) runqput on _p_ kicks G1 to the runq, 3) runqget on _p_ empties runqnext.
 	// Simply observing that runqhead == runqtail and then observing that runqnext == nil
 	// does not mean the queue is empty.
+	/*
 	for {
 		head := atomic.Load(&_p_.runqhead)
+		tail := atomic.Load(&_p_.runqtail)
+		runnext := atomic.Loaduintptr((*uintptr)(unsafe.Pointer(&_p_.runnext)))
+		if tail == atomic.Load(&_p_.runqtail) {
+			return head == tail && runnext == 0
+		}
+	}
+	 */
+
+	//modify by jemuel
+	for {
+		_, hl := loadrunqhead(_p_)
+		head := uint32(hl)
 		tail := atomic.Load(&_p_.runqtail)
 		runnext := atomic.Loaduintptr((*uintptr)(unsafe.Pointer(&_p_.runnext)))
 		if tail == atomic.Load(&_p_.runqtail) {
@@ -5787,6 +5864,7 @@ const randomizeScheduler = raceenabled
 // If the run queue is full, runnext puts g on the global queue.
 // Executed only by the owner P.
 func runqput(_p_ *p, gp *g, next bool) {
+	/*
 	if randomizeScheduler && next && fastrand()%2 == 0 {
 		next = false
 	}
@@ -5817,10 +5895,33 @@ retry:
 	}
 	// the queue is not full, now the put above must succeed
 	goto retry
+	 */
+
+	//modify by jemuel
+	if randomizeScheduler && next && fastrand()%2 == 0 {
+		next = false
+	}
+
+retry:
+	hh, hl := loadrunqhead(_p_)
+	h := uint32(hl)
+	runq := &_p_.runq[hh]
+	t := _p_.runqtail
+	if t-h < uint32(len(runq)) {
+		runq[t%uint32(len(runq))].set(gp)
+		atomic.StoreRel(&_p_.runqtail, t+1) // store-release, makes the item available for consumption
+		return
+	}
+	if runqputslow(_p_, gp, hh, hl, t) {
+		return
+	}
+	// the queue is not full, now the put above must succeed
+	goto retry
 }
 
 // Put g and a batch of work from local runnable queue on global queue.
 // Executed only by the owner P.
+/*
 func runqputslow(_p_ *p, gp *g, h, t uint32) bool {
 	var batch [len(_p_.runq)/2 + 1]*g
 
@@ -5859,12 +5960,120 @@ func runqputslow(_p_ *p, gp *g, h, t uint32) bool {
 	unlock(&sched.lock)
 	return true
 }
+ */
+//modify by jemuel
+func runqputslow(_p_ *p, gp *g, hh, hl uint64, t uint32) bool {
+	//runq := &_p_.runq[hh]
+	activerunq := &_p_.runq[hh]
+	idlerunq := &_p_.runq[1-hh]
+	h := uint32(hl)
+
+	var batch [len(activerunq)/2 + 1]*g
+
+	// First, grab a batch from local queue.
+	n := t - h
+	n = n / 2
+	if n != uint32(len(activerunq)/2) {
+		throw("runqputslow: queue is not full")
+	}
+
+	var highs [len(idlerunq)/2]guintptr //高优先级，保留在本地队列
+	var lows [len(idlerunq)/2]guintptr //低优先级，放入全局队列
+	//拷贝active runq -> idle runq
+	for i:=h; i<t; i++ {
+		idlerunq[i%uint32(len(idlerunq))] = activerunq[i%uint32(len(activerunq))]
+	}
+	//拷贝前n个到lows
+	for i := uint32(0); i < n; i++ {
+		lows[i] = idlerunq[(h+i)%uint32(len(idlerunq))]
+	}
+	//lows采用大根堆排序
+	for i:=uint32(0); i<n; i++ {
+		ci := i //child index
+		pi := (ci-1)/2 //parent index
+		for ci > 0 {
+			child := lows[ci]
+			parent := lows[pi]
+			if child.ptr().priority <= parent.ptr().priority {
+				break
+			}
+			lows[ci], lows[pi] = parent, child
+			ci = pi
+			pi = (ci-1)/2
+		}
+	}
+	//idle中优先级小的放入lows中，大的放入highs
+	for i:=h+n; i<t; i++ {
+		item := idlerunq[i%uint32(len(idlerunq))]
+		if item.ptr().priority < lows[0].ptr().priority {
+			highs[i-h-n] = lows[0]
+			lows[0] = item
+			//重建lows大根堆
+			pi := uint32(0)
+			lci := 2*pi + 1
+			for lci < n {
+				rci := lci + 1
+				lchild := lows[lci]
+				mci := lci
+				if rci < n && lows[rci].ptr().priority > lchild.ptr().priority {
+					mci = rci
+				}
+				parent := lows[pi]
+				mchild := lows[mci]
+				if mchild.ptr().priority <= parent.ptr().priority {
+					break
+				}
+				lows[pi], lows[mci] = mchild, parent
+				pi = mci
+				lci = 2*pi + 1
+			}
+		} else {
+			highs[i-h-n] = item
+		}
+	}
+	//拷贝highs到idle
+	for i:=uint32(0); i<n; i++ {
+		idlerunq[(h+n+i)%uint32(len(idlerunq))] = highs[i]
+	}
+	//拷贝lows到batch
+	for i:=uint32(0); i<n; i++ {
+		batch[i] = lows[i].ptr()
+	}
+	ho := hh<<32 | hl
+	hn := (1-hh)<<32 | uint64(h+n)
+	if !atomic.Cas64(&_p_.runqhead, ho, hn) { // cas-release, commits consume
+		return false
+	}
+	batch[n] = gp
+
+	if randomizeScheduler {
+		for i := uint32(1); i <= n; i++ {
+			j := fastrandn(i + 1)
+			batch[i], batch[j] = batch[j], batch[i]
+		}
+	}
+
+	// Link the goroutines.
+	for i := uint32(0); i < n; i++ {
+		batch[i].schedlink.set(batch[i+1])
+	}
+	var q gQueue
+	q.head.set(batch[0])
+	q.tail.set(batch[n])
+
+	// Now put the batch on global queue.
+	lock(&sched.lock)
+	globrunqputbatch(&q, int32(n+1))
+	unlock(&sched.lock)
+	return true
+}
 
 // runqputbatch tries to put all the G's on q on the local runnable queue.
 // If the queue is full, they are put on the global queue; in that case
 // this will temporarily acquire the scheduler lock.
 // Executed only by the owner P.
 func runqputbatch(pp *p, q *gQueue, qsize int) {
+	/*
 	h := atomic.LoadAcq(&pp.runqhead)
 	t := pp.runqtail
 	n := uint32(0)
@@ -5892,6 +6101,38 @@ func runqputbatch(pp *p, q *gQueue, qsize int) {
 		globrunqputbatch(q, int32(qsize))
 		unlock(&sched.lock)
 	}
+	 */
+
+	//modify by jemuel
+	hh, hl := loadrunqhead(pp)
+	h := uint32(hl)
+	runq := &pp.runq[hh]
+	t := pp.runqtail
+	n := uint32(0)
+	for !q.empty() && t-h < uint32(len(runq)) {
+		gp := q.pop()
+		runq[t%uint32(len(runq))].set(gp)
+		t++
+		n++
+	}
+	qsize -= int(n)
+
+	if randomizeScheduler {
+		off := func(o uint32) uint32 {
+			return (pp.runqtail + o) % uint32(len(runq))
+		}
+		for i := uint32(1); i < n; i++ {
+			j := fastrandn(i + 1)
+			runq[off(i)], runq[off(j)] = runq[off(j)], runq[off(i)]
+		}
+	}
+
+	atomic.StoreRel(&pp.runqtail, t)
+	if !q.empty() {
+		lock(&sched.lock)
+		globrunqputbatch(q, int32(qsize))
+		unlock(&sched.lock)
+	}
 }
 
 // Get g from local runnable queue.
@@ -5899,6 +6140,7 @@ func runqputbatch(pp *p, q *gQueue, qsize int) {
 // current time slice. Otherwise, it should start a new time slice.
 // Executed only by the owner P.
 func runqget(_p_ *p) (gp *g, inheritTime bool) {
+	/*
 	// If there's a runnext, it's the next G to run.
 	for {
 		next := _p_.runnext
@@ -5921,6 +6163,42 @@ func runqget(_p_ *p) (gp *g, inheritTime bool) {
 			return gp, false
 		}
 	}
+	*/
+
+	//modify by jemuel
+	for {
+		hh, hl := loadrunqhead(_p_)
+		h := uint32(hl)
+		t := _p_.runqtail
+		if t == h {
+			return nil, false
+		}
+		activerunq := &_p_.runq[hh]
+		idlerunq := &_p_.runq[1-hh]
+		//拷贝active runq -> idle runq
+		maxindex := h
+		maxpriority := activerunq[maxindex%uint32(len(activerunq))].ptr().priority
+		for i:=h; i<t; i++ {
+			item := activerunq[i%uint32(len(activerunq))]
+			idlerunq[i%uint32(len(idlerunq))] = item
+			if item.ptr().priority > maxpriority {
+				maxindex = i
+				maxpriority = item.ptr().priority
+			}
+		}
+		//交换最大元素和首元素
+		if maxindex != h {
+			idlerunq[h%uint32(len(idlerunq))], idlerunq[maxindex%uint32(len(idlerunq))] =
+				idlerunq[maxindex%uint32(len(idlerunq))], idlerunq[h%uint32(len(idlerunq))]
+		}
+		//取最大元素
+		gp := idlerunq[h%uint32(len(idlerunq))].ptr()
+		ho := hh<<32 | hl
+		hn := (1-hh)<<32 | (hl+1)
+		if atomic.Cas64(&_p_.runqhead, ho, hn) { // cas-release, commits consume
+			return gp, false
+		}
+	}
 }
 
 // Grabs a batch of goroutines from _p_'s runnable queue into batch.
@@ -5928,6 +6206,7 @@ func runqget(_p_ *p) (gp *g, inheritTime bool) {
 // Returns number of grabbed goroutines.
 // Can be executed by any P.
 func runqgrab(_p_ *p, batch *[256]guintptr, batchHead uint32, stealRunNextG bool) uint32 {
+	/*
 	for {
 		h := atomic.LoadAcq(&_p_.runqhead) // load-acquire, synchronize with other consumers
 		t := atomic.LoadAcq(&_p_.runqtail) // load-acquire, synchronize with the producer
@@ -5977,12 +6256,68 @@ func runqgrab(_p_ *p, batch *[256]guintptr, batchHead uint32, stealRunNextG bool
 			return n
 		}
 	}
+	 */
+
+	for {
+		hh, hl := loadrunqhead(_p_) // load-acquire, synchronize with other consumers
+		t := atomic.LoadAcq(&_p_.runqtail) // load-acquire, synchronize with the producer
+		runq := &_p_.runq[hh]
+		h := uint32(hl)
+		n := t - h
+		n = n - n/2
+		if n == 0 {
+			if stealRunNextG {
+				// Try to steal from _p_.runnext.
+				if next := _p_.runnext; next != 0 {
+					if _p_.status == _Prunning {
+						// Sleep to ensure that _p_ isn't about to run the g
+						// we are about to steal.
+						// The important use case here is when the g running
+						// on _p_ ready()s another g and then almost
+						// immediately blocks. Instead of stealing runnext
+						// in this window, back off to give _p_ a chance to
+						// schedule runnext. This will avoid thrashing gs
+						// between different Ps.
+						// A sync chan send/recv takes ~50ns as of time of
+						// writing, so 3us gives ~50x overshoot.
+						if GOOS != "windows" {
+							usleep(3)
+						} else {
+							// On windows system timer granularity is
+							// 1-15ms, which is way too much for this
+							// optimization. So just yield.
+							osyield()
+						}
+					}
+					if !_p_.runnext.cas(next, 0) {
+						continue
+					}
+					batch[batchHead%uint32(len(batch))] = next
+					return 1
+				}
+			}
+			return 0
+		}
+		if n > uint32(len(runq)/2) { // read inconsistent h and t
+			continue
+		}
+		for i := uint32(0); i < n; i++ {
+			g := runq[(h+i)%uint32(len(runq))]
+			batch[(batchHead+i)%uint32(len(batch))] = g
+		}
+		ho := hh<<32 | hl
+		hn := hh<<32 | uint64(h+n)
+		if atomic.Cas64(&_p_.runqhead, ho, hn) { // cas-release, commits consume
+			return n
+		}
+	}
 }
 
 // Steal half of elements from local runnable queue of p2
 // and put onto local runnable queue of p.
 // Returns one of the stolen elements (or nil if failed).
 func runqsteal(_p_, p2 *p, stealRunNextG bool) *g {
+	/*
 	t := _p_.runqtail
 	n := runqgrab(p2, &_p_.runq, t, stealRunNextG)
 	if n == 0 {
@@ -5999,6 +6334,129 @@ func runqsteal(_p_, p2 *p, stealRunNextG bool) *g {
 	}
 	atomic.StoreRel(&_p_.runqtail, t+n) // store-release, makes the item available for consumption
 	return gp
+	 */
+	//modify by jemuel
+	hh, _ := loadrunqhead(_p_)
+	activerunq := &_p_.runq[hh]
+	idlerunq := &_p_.runq[1-hh]
+	t := _p_.runqtail
+	n := runqgrab(p2, activerunq, t, stealRunNextG)
+	if n == 0 {
+		return nil
+	}
+	hh, hl := loadrunqhead(_p_)
+	h := uint32(hl) // load-acquire, synchronize with consumers
+	if t-h+n > uint32(len(activerunq)) {
+		throw("runqsteal: runq overflow")
+	}
+	//原来没有，只偷取了一个，直接返回（原来没有也不可能被偷，head不会变化）
+	if t == h && n == 1 {
+		gp := activerunq[t%uint32(len(activerunq))].ptr()
+		return gp
+	}
+	//max heap sort
+	for {
+		hh, hl := loadrunqhead(_p_)
+		h := uint32(hl)
+		//拷贝active runq -> idle runq
+		maxindex := t+n-1
+		maxpriority := activerunq[maxindex%uint32(len(activerunq))].ptr().priority
+		for i:=h; i<t+n; i++ {
+			item := activerunq[i%uint32(len(activerunq))]
+			idlerunq[i%uint32(len(idlerunq))] = item
+			if item.ptr().priority > maxpriority {
+				maxindex = i
+				maxpriority = item.ptr().priority
+			}
+		}
+		//交换最大元素和尾元素
+		if maxindex != t+n-1 {
+			idlerunq[(t+n-1)%uint32(len(idlerunq))], idlerunq[maxindex%uint32(len(idlerunq))] =
+				idlerunq[maxindex%uint32(len(idlerunq))], idlerunq[(t+n-1)%uint32(len(idlerunq))]
+		}
+		//取最大元素
+		gp := idlerunq[(t+n-1)%uint32(len(idlerunq))].ptr()
+		ho := hh<<32 | hl
+		hn := (1-hh)<<32 | hl
+		if atomic.Cas64(&_p_.runqhead, ho, hn) { // cas-release, commits consume
+			atomic.StoreRel(&_p_.runqtail, t+n-1)
+			return gp
+		}
+	}
+}
+
+func loadrunqhead(_p_ *p) (uint64, uint64) {
+	h := atomic.LoadAcq64(&_p_.runqhead)
+	hh := h >> 32
+	hl := h & 0x00000000ffffffff
+	if hh != 0 && hh != 1 {
+		throw("parserunqhead: runqhead error")
+	}
+	return hh, hl
+}
+
+func printpinfo(prefix string, _p_ *p) {
+	hh, hl := loadrunqhead(_p_)
+	tail := atomic.Load(&_p_.runqtail)
+	//order := atomic.Load(&_p_.runqorder)
+	activerunq := &_p_.runq[hh]
+	idlerunq := &_p_.runq[1-hh]
+	print(prefix)
+	print("hh:", hh, ",hl:", hl, ",tail:", tail, ",")
+	print("activerunq:[")
+	for i:=hl; i<uint64(tail); i++ {
+		q := activerunq[i%uint64(len(activerunq))]
+		if q != 0 {
+			print(q.ptr().goid, ",")
+		}
+	}
+	print("],idlerunq:[")
+	for i:=hl; i<uint64(tail); i++ {
+		q := idlerunq[i%uint64(len(idlerunq))]
+		if q != 0 {
+			print(q.ptr().goid, ",")
+		}
+	}
+	print("],free:[")
+	h := _p_.gFree.head
+	for h != 0 {
+		print(h.ptr().goid, ",")
+		h = h.ptr().schedlink
+	}
+	print("]\n")
+}
+
+func printschedinfo(prefix string) {
+	print(prefix)
+	print("schedrunq:[")
+	p := sched.runq.head
+	for p != 0 {
+		print(p.ptr().goid, ",")
+		p = p.ptr().schedlink
+	}
+	print("],nostack:[")
+	h := sched.gFree.noStack.head
+	for h != 0 {
+		print(h.ptr().goid, ",")
+		h = h.ptr().schedlink
+	}
+	print("], stack:[")
+	h = sched.gFree.stack.head
+	for h != 0 {
+		print(h.ptr().goid, ",")
+		h = h.ptr().schedlink
+	}
+	print("]\n")
+}
+
+func printqueue(prefix string, q *gQueue) {
+	print(prefix, ",[")
+	p := q.head
+	for p != 0 {
+		print(p.ptr().goid, ",")
+		p = p.ptr().schedlink
+	}
+	print("]\n")
 }
 
 // A gQueue is a dequeue of Gs linked through g.schedlink. A G can only
@@ -6046,6 +6504,55 @@ func (q *gQueue) pushBackAll(q2 gQueue) {
 		q.head = q2.head
 	}
 	q.tail = q2.tail
+}
+
+//modify by jemuel
+func (q *gQueue) pushOrder(gp *g) {
+	var f guintptr
+	b := q.head
+	for b != 0 {
+		if b.ptr().priority > gp.priority {
+			f = b
+			b = b.ptr().schedlink
+			continue
+		}
+		break
+	}
+	if f == 0 {
+		//头部
+		gp.schedlink = q.head
+		q.head.set(gp)
+		if q.tail == 0 {
+			q.tail.set(gp)
+		}
+	} else if b == 0 {
+		//尾部
+		gp.schedlink = 0
+		if q.tail != 0 {
+			q.tail.ptr().schedlink.set(gp)
+		} else {
+			q.head.set(gp)
+		}
+		q.tail.set(gp)
+	} else {
+		f.ptr().schedlink.set(gp)
+		gp.schedlink = b
+	}
+}
+
+//modify by jemuel
+func (q *gQueue) pushAllOrder(q2 gQueue) {
+	if q2.tail == 0 {
+		return
+	}
+	//置tail连接为空
+	q2.tail.ptr().schedlink = 0
+	p := q2.head
+	for p != 0 {
+		g := p.ptr()
+		p = p.ptr().schedlink
+		q.pushOrder(g)
+	}
 }
 
 // pop removes and returns the head of queue q. It returns nil if

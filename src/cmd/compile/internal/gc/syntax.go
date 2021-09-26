@@ -917,6 +917,7 @@ const (
 	OIF     // if Ninit; Left { Nbody } else { Rlist }
 	OLABEL  // Sym:
 	OGO     // go Left (Left must be call)
+	OGORDER // gorder Left (Left must be call)
 	ORANGE  // for List = range Right { Nbody }
 	ORETURN // return List
 	OSELECT // select { List } (List is list of OCASE)

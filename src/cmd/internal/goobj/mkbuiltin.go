@@ -146,6 +146,7 @@ var fextras = [...]extra{
 	{"deferprocStack", 1},
 	{"deferreturn", 1},
 	{"newproc", 1},
+	{"newprocorder", 1},
 	{"panicoverflow", 1},
 	{"sigpanic", 1},
 

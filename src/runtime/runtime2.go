@@ -481,6 +481,9 @@ type g struct {
 	// and check for debt in the malloc hot path. The assist ratio
 	// determines how this corresponds to scan work debt.
 	gcAssistBytes int64
+
+	//modify by jemuel
+	priority int32
 }
 
 type m struct {
@@ -596,6 +599,7 @@ type p struct {
 	goidcacheend uint64
 
 	// Queue of runnable goroutines. Accessed without lock.
+	/*
 	runqhead uint32
 	runqtail uint32
 	runq     [256]guintptr
@@ -609,6 +613,13 @@ type p struct {
 	// latency that otherwise arises from adding the ready'd
 	// goroutines to the end of the run queue.
 	runnext guintptr
+	 */
+	//modify by jemuel
+	runqhead uint64
+	runqtail uint32
+	//runqorder uint32
+	runq	[2][256]guintptr
+	runnext	guintptr
 
 	// Available G's (status == Gdead)
 	gFree struct {

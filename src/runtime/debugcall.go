@@ -114,7 +114,7 @@ func debugCallWrap(dispatch uintptr) {
 		args.dispatch = dispatch
 		args.callingG = gp
 		fn := debugCallWrap1
-		newg := newproc1(*(**funcval)(unsafe.Pointer(&fn)), unsafe.Pointer(&args), int32(unsafe.Sizeof(args)), gp, callerpc)
+		newg := newproc1(gp.priority, *(**funcval)(unsafe.Pointer(&fn)), unsafe.Pointer(&args), int32(unsafe.Sizeof(args)), gp, callerpc)
 
 		// If the current G is locked, then transfer that
 		// locked-ness to the new goroutine.

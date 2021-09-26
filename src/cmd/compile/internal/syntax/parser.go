@@ -306,7 +306,8 @@ const stopset uint64 = 1<<_Break |
 	1<<_Select |
 	1<<_Switch |
 	1<<_Type |
-	1<<_Var
+	1<<_Var |
+	1<<_Gorder
 
 // Advance consumes tokens until it finds a token of the stopset or followlist.
 // The stopset is only considered if we are inside a function (p.fnest > 0).
@@ -2156,7 +2157,7 @@ func (p *parser) stmtOrNil() Stmt {
 		}
 		return s
 
-	case _Go, _Defer:
+	case _Go, _Defer, _Gorder:
 		return p.callStmt()
 
 	case _Goto:

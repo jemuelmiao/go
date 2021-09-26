@@ -312,6 +312,7 @@ var (
 	msanmove,
 	newobject,
 	newproc,
+	newprocorder,
 	panicdivide,
 	panicshift,
 	panicdottypeE,

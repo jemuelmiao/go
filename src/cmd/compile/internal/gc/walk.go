@@ -216,7 +216,7 @@ func walkstmt(n *Node) *Node {
 			Curfn.Func.SetOpenCodedDeferDisallowed(true)
 		}
 		fallthrough
-	case OGO:
+	case OGO, OGORDER:
 		switch n.Left.Op {
 		case OPRINT, OPRINTN:
 			n.Left = wrapCall(n.Left, &n.Ninit)

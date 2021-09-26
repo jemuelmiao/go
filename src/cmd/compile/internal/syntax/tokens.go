@@ -52,6 +52,7 @@ const (
 	_For         // for
 	_Func        // func
 	_Go          // go
+	_Gorder      // gorder
 	_Goto        // goto
 	_If          // if
 	_Import      // import
@@ -80,6 +81,7 @@ const (
 	// for CallStmt
 	Go    = _Go
 	Defer = _Defer
+	Gorder= _Gorder
 )
 
 // Make sure we have at most 64 tokens so we can use them in a set.
